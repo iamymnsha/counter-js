@@ -1,5 +1,7 @@
 /*
-once DOMContentLoaded, call our counter JS fn, have state locally, write handlers, have updater fn, updater fn calls render fn
+once DOMContentLoaded, call our counter JS fn,
+User clicks button -> dispatch({type:"INCREMENT"})->reducer(state, action)->newState returned
+->state = newState ->render()
 */
 
 function counter() {
@@ -7,10 +9,11 @@ function counter() {
   let state = {
     counter: 0,
     step: 1,
+    message: "",
+    max: 100,
   };
-  let MAX = 100;
-  let message = "";
-  let history = [];
+  const historyStack = [];
+  const logEntries = [];
 
   //ELEMENTS
   let counterEl = document.getElementById("counter");
@@ -24,130 +27,153 @@ function counter() {
 
   //update the DOM - “Everything UI-related based on state.”
   function render() {
-    const { counter, step } = state;
+    const { counter, step, message } = state;
     //just chaning text inside element, so textContent
     counterEl.textContent = counter;
-    incrementEl.disabled = counter === MAX;
+    incrementEl.disabled = counter === state.max;
     decrementEl.disabled = counter === 0;
     msgEl.textContent = message;
     stepEl.textContent = step;
-    undoEl.disabled = history.length === 0;
+    undoEl.disabled = historyStack.length === 0;
   }
 
-  //User action -> updateCounter() -> State mutation -> render()
-  function updateCounter(action) {
-    const { counter, step } = state;
-    switch (action) {
+  function dispatch({ type, payload }) {
+    //save prevState
+    const prevState = state;
+    const newState = reducer(state, { type, payload });
+
+    //in history, for undo, we just save prev state i.e. counter and step
+    if (type !== "UNDO") historyStack.push({ ...prevState });
+
+    //in logs, we show prevValue, currentValue, type and step
+    const logEntry = {
+      prevValue: prevState.counter,
+      value: newState.counter,
+      type: type,
+      step: prevState.step,
+    };
+    logEntries.push(logEntry);
+    printLog(logEntry);
+    state = newState;
+    render();
+  }
+
+  //Reducer takes state and gives new state
+  function reducer(state, action) {
+    const { counter, step, max } = state;
+    switch (action.type) {
       case "INCREMENT":
-        if (counter + step <= MAX) {
-          state = {
-            ...state,
-            counter: counter + step,
-          };
-          logHistory("INCREMENT", counter);
-          message = "";
-        } else {
-          message = "cannot go beyond MAX";
-        }
-        break;
+        if (counter + step > max)
+          return { ...state, message: "cannot go beyond maximum value" };
+        return {
+          ...state,
+          counter: counter + step,
+          message: "",
+        };
       case "DECREMENT":
-        if (counter - step < 0) {
-          message = "cannot go below 0";
-        } else {
-          state = {
-            ...state,
-            counter: counter - step,
-          };
-          logHistory("DECREMENT", counter);
-        }
-        break;
+        if (counter - step < 0)
+          return { ...state, message: "cannot go below 0" };
+        return {
+          ...state,
+          counter: counter - step,
+          message: "",
+        };
       case "RESET":
-        state = {
+        return {
           ...state,
           counter: 0,
           step: 1,
+          message: "",
         };
-        logHistory("RESET", counter);
-        message = "";
-        inputEl.value = "";
-        break;
+      case "UNDO":
+        const lastState = historyStack.pop();
+        return {
+          ...state,
+          counter: lastState.counter,
+          step: lastState.step,
+          message: "",
+        };
+      case "UPDATE_STEP":
+        if (Number.isNaN(action.payload)) {
+          return {
+            ...state,
+            message: "Step must be a number",
+          };
+        }
+        if (action.payload <= 0) {
+          return {
+            ...state,
+            message: "Step must be greater than 0",
+          };
+        }
+        return {
+          ...state,
+          step: action.payload,
+          message: "",
+        };
+      default:
+        return {
+          ...state,
+          counter: 0,
+          step: 1,
+          message: "",
+        };
     }
-    render();
   }
 
-  function logHistory(action, preValue) {
-    const { counter, step } = state;
-    //log the history and push to history stack
-    console.log({
-      prevValue: preValue,
-      nextValue: counter,
-      step: step,
-      action: action,
-    });
-    history.push({
-      prevValue: preValue,
-      nextValue: counter,
-      step: step,
-      action: action,
-    });
-  }
-
-  function handleUndo() {
-    if (!history.length) return;
-    //pop the last history and setState
-    const lastState = history.pop();
-    console.log(lastState, "lastState");
-    state = {
-      ...state,
-      counter: lastState.prevValue,
-      step: lastState.step,
-    };
-    render();
-  }
-
-  function updateStep(value) {
-    const stepValue = Number(value.trim());
-
-    if (Number.isNaN(stepValue)) {
-      message = "Step must be a number";
-      render();
-      return;
-    }
-
-    if (stepValue <= 0) {
-      message = "Step must be greater than 0";
-      render();
-      return;
-    }
-
-    state = {
-      ...state,
-      step: stepValue,
-    };
-
-    message = "";
-    inputEl.value = "";
-
-    render();
+  function printLog(log) {
+    console.log(log);
   }
 
   //Handlers - updates the state and call to update DOM
   incrementEl.addEventListener("click", () => {
-    updateCounter("INCREMENT");
+    dispatch({
+      type: "INCREMENT",
+    });
   });
   decrementEl.addEventListener("click", () => {
-    updateCounter("DECREMENT");
+    dispatch({
+      type: "DECREMENT",
+    });
   });
   resetEl.addEventListener("click", () => {
-    updateCounter("RESET");
+    dispatch({
+      type: "RESET",
+    });
   });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const stepValue = e.target.querySelector("input").value;
-    updateStep(stepValue);
+    const stepValue = Number(e.target.querySelector("input").value);
+    dispatch({
+      type: "UPDATE_STEP",
+      payload: stepValue,
+    });
+
+    //upon succesfull state update, we can remove input value
+    if (!state.message) {
+      inputEl.value = "";
+    }
   });
   undoEl.addEventListener("click", (e) => {
-    handleUndo();
+    dispatch({
+      type: "UNDO",
+    });
+  });
+
+  /*
+    keydown event fires,event object tells us which key,we map that key to an action,dispatch(action)
+  */
+  document.addEventListener("keydown", (e) => {
+    const keyActionMap = {
+      ArrowUp: "INCREMENT",
+      ArrowDown: "DECREMENT",
+      r: "RESET",
+    };
+
+    const action = keyActionMap[e.key];
+    if (action) {
+      dispatch({ type: action });
+    }
   });
 
   render();
